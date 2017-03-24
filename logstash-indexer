@@ -1,0 +1,138 @@
+#!/bin/bash
+# ==============================================================================
+# Version       : 0.1
+# Date          : 2017/03/24
+# Last updated  : 2017/03/24
+# Autor         : Alexandre Bray
+# Information   : support@opendoc.net 
+# GIT URL       : https://github.com/opendocnet/elk/blob/master/logstash_indexer
+# GIT REVISION  : 10
+# Revision :
+#   0.1 : first version (rev 10)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# VARIABLES
+# ------------------------------------------------------------------------------
+Green="\\033[1;32m"
+Normal="\\033[0;39m"
+Red="\\033[1;31m"
+LogstashBin="/usr/share/logstash/bin/logstash"
+NodeName="logstash_indexer"
+PathData="/usr/share/logstash/${NodeName}/"
+PathLogs="/var/log/logstash/${NodeName}/"
+PathConfig="/etc/logstash/conf.d/${NodeName}.conf"
+PathSettings="/etc/logstash/"
+LogLevel="info"
+PidFile="/var/run/${NodeName}.pid"
+awk="/usr/bin/awk"
+User="logstash"
+
+# ------------------------------------------------------------------------------
+# FUNCTIONS 
+# ------------------------------------------------------------------------------
+fct_doopts () {
+    
+    case "${1}" in
+        "start") Processing="start" ;;
+        "stop") Processing="stop" ;;
+        "restart") Processing="restart" ;;
+        "status") Processing="status" ;;
+        *) fct_usage ; exit ;;
+    esac
+    
+}
+
+#> Print usage
+fct_usage () {
+    
+    echo -e "Usage: `basename $0` <processing>"
+    echo -e "  ${Green}start${Normal}       : start ${NodeName}."
+    echo -e "  ${Green}stop${Normal}        : stop ${NodeName}."
+    echo -e "  ${Green}restart${Normal}     : restart ${NodeName}."
+    echo -e "  ${Green}status${Normal}      : show status ${NodeName}."
+    echo -e "  ${Green}-h/-help${Normal}    : show help."
+    echo -e ""
+    exit 2
+    
+}
+
+fct_status () {
+        
+    if (( $(ps faux |grep "\-\-node.name ${NodeName}" |wc -l) == 1)) && test -e "${PidFile}"; then
+        echo -e "["${Green}" OK "${Normal}"] ${NodeName} is running (pid : $(cat ${PidFile} |tr '\n' ',' |sed 's/.$//'))."
+        NodeStatus=0
+        
+    else
+        echo -e "["${Red}" FAIL "${Normal}"] ${NodeName} is not running."
+        rm ${PidFile} &> /dev/nul
+        NodeStatus=2
+        
+    fi
+}
+
+
+fct_start() {
+    
+    if [ "$(id |awk -F "[()]" '{print $2}')" != "root" ] ; then
+        echo "You must be root."
+        exit 2
+    fi
+     
+    fct_status &> /dev/null
+    
+    if (( ${NodeStatus} == 0 )); then
+        echo -e "["${Red}" FAIL "${Normal}"] ${NodeName} is already running (pid : $(cat ${PidFile} |tr '\n' ',' |sed 's/.$//'))."
+     
+    else
+        
+        touch ${PidFile}
+        chown ${User} ${PidFile}
+        /bin/su - ${User} -c "/usr/bin/nohup ${LogstashBin} --node.name ${NodeName} --path.config ${PathConfig} --path.data ${PathData} --path.logs ${PathLogs} --log.level ${LogLevel} --path.settings ${PathSettings} --http.host 0.0.0.0 --http.port 9621 > /tmp/debug-${NodeName} 2>&1 &"
+        sleep 3
+        ps faux |grep "\-\-node.name ${NodeName}"|awk '{print $2}' > ${PidFile}
+        fct_status
+    fi
+
+}
+
+fct_stop () {
+    
+    if [ "$(id |awk -F "[()]" '{print $2}')" != "root" ] ; then
+        echo "You must be root."
+        exit 2
+    fi
+
+    fct_status &> /dev/null
+    
+    if (( ${NodeStatus} == 2 )); then
+        echo -e "["${Red}" FAIL "${Normal}"] ${NodeName} is already stopped."
+        
+     
+    else
+        for pid in $(cat ${PidFile}); do kill $pid; done
+        sleep 3
+        fct_status &> /dev/null
+        if (( ${NodeStatus} == 2 )); then
+            echo -e "["${Green}" OK "${Normal}"] ${NodeName} is stopped."
+        fi
+        
+    fi
+    
+}
+
+fct_restart () {
+    
+    fct_stop
+    fct_start
+    
+}
+
+# ------------------------------------------------------------------------------
+# PROCESSING
+# ------------------------------------------------------------------------------
+#> Handle command line options
+fct_doopts $@
+
+#> Run processing
+fct_"${Processing}"
