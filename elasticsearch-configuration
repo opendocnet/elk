@@ -30,15 +30,15 @@
 
 path.data: /datas/elasticsearch/ 
 path.logs: /var/log/elasticsearch/ 
-cluster.name: "elasticsearch_exploitation"
+cluster.name: "elasticsearch_xxxxx"
 node.name: "verselastic01"
 node.master: true
 node.data: true
 transport.tcp.port: 9303
 network.bind_host: 0.0.0.0
-network.publish_host: 172.16.15.78
+network.publish_host: x.x.x.x
 http.port: 9207
-discovery.zen.ping.unicast.hosts: ["172.16.15.78", "172.16.15.79", "172.16.15.80"] 
+discovery.zen.ping.unicast.hosts: ["x.x.x.x", "x.x.x.x", "x.x.x.x"] 
 discovery.zen.minimum_master_nodes: 2
 gateway.recover_after_nodes: 3
 
