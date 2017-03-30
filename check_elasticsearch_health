@@ -1,0 +1,89 @@
+#!/bin/bash
+# ==============================================================================
+# Version       : 0.1
+# Date          : 2017/03/30
+# Last updated  : 2017/03/30
+# Autor         : Alexandre Bray
+# Information   : support@opendoc.net 
+# GIT URL       : https://github.com/opendocnet/elk/blob/master/check_elasticsearch_health
+# GIT REVISION  : 18
+# Revision :
+#   0.1 : first version (rev 18)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# VARIABLES
+# ------------------------------------------------------------------------------
+
+# ------------------------------------------------------------------------------
+# FUNCTIONS 
+# ------------------------------------------------------------------------------
+#> Print usage
+usage () {
+    echo " Usage: `basename $0` -l <loadbalancer> -p <port> -t <timeout>"
+    echo ""
+    echo "  -l  loadbalancer"
+    echo "  -p  port"
+    echo "  -t  timeout"
+    echo "  -h  help : show help"
+    echo ""
+}
+
+#> Process command line options
+doopts() {
+    if ( `test 0 -lt $#` ); then
+        while getopts l:p:t:h myarg "$@" ; do
+            case $myarg in
+                h)
+                    usage
+                    exit;;
+                l)
+                    Lb=$OPTARG;;
+                p)
+                    Port=$OPTARG;;
+                t)
+                    Timeout=$OPTARG;;
+                *)
+                    usage
+                    exit;;
+            esac
+        done
+    else
+        usage
+        exit
+    fi
+}
+
+function_health () {
+    
+    Health=$(curl --connect-timeout ${Timeout} -XGET 'http://'${Lb}':'${Port}'/_cluster/health?pretty=true' 2>/dev/null| grep "status" | awk -F "\"" '{print $4}')
+    if (( $? != 0 )) ; then
+         
+        echo "CRITICAL : The cluster does not respond"
+        exit 2
+        
+    fi
+    
+    if [ "${Health}" != "green" ] ; then
+         
+        echo "CRITICAL : cluster health ${Health}"
+        exit 2
+     
+    else
+         
+        echo "OK : cluster health green"
+        exit 0
+     
+    fi
+   
+}
+
+
+#-------------------------------------------------------------------------------
+# MAIN 
+#-------------------------------------------------------------------------------
+#> Handle command line options
+doopts $@
+
+#> Run processing
+function_health
