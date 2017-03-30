@@ -1,0 +1,103 @@
+#!/bin/bash
+# ==============================================================================
+# Version       : 0.1
+# Date          : 2017/03/30
+# Last updated  : 2017/03/30
+# Autor         : Alexandre Bray
+# Information   : support@opendoc.net 
+# GIT URL       : https://github.com/opendocnet/elk/blob/master/check_haproxy_backend
+# GIT REVISION  : 16
+# Revision :
+#   0.1 : first version (rev 16)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# VARIABLES
+# ------------------------------------------------------------------------------
+Timeout=10
+
+# ------------------------------------------------------------------------------
+# FUNCTIONS 
+# ------------------------------------------------------------------------------
+#> Print usage
+fct_usage () {
+    echo "Usage: `basename $0` -H <host> -t <timeout> -f <frontend> -w <warning> -c <critical>"
+    echo ""
+    echo "  -H  : haproxy host"
+    echo "  -t  : timeout of request (default 10s)"
+    echo "  -b  : backend name"
+    echo "  -w  : warning in %"
+    echo "  -c  : critical in %"
+    echo "  -h  : show help"
+    echo ""
+    exit 2
+}
+
+#> Process command line options
+fct_doopts () {
+    IFS=$'\n'
+    for args in $(echo -e "$(echo " $@" |sed 's/ -/\\n/g')"); do
+        Opt="$(echo "${args}" |cut -d " " -f1)"
+        ArgOpt="$(echo "${args}" |cut -d " " -f2-99 )"
+        
+        case "${Opt}" in
+            "H"|"host")         Host="${ArgOpt}";;
+            "t"|"timeout")      Timeout="${ArgOpt}";;
+            "b"|"fronted")      Backend="${ArgOpt}";;
+            "w"|"warning")      Warning="${ArgOpt}" ;;
+            "c"|"critical")     Critical="${ArgOpt}" ;;
+            *)                  fct_usage ;;
+        esac
+     
+    done
+}
+
+
+fct_haproxy_backend () {
+    
+    Data=$(curl --connect-timeout ${Timeout} "http://${Host}:8080/stats;csv" 2>/dev/null |grep "${Backend}" |grep -v ",BACKEND,")
+    if (( $? != 0 )) ; then
+         
+        echo "CRITICAL : The HAProxy does not respond"
+        exit 2
+        
+    fi
+    
+    BackendTotal=$(echo -e "${Data}" |wc -l)
+    BackendUP=$(echo -e "${Data}" |grep ",UP," |wc -l)
+    BackendDOWN=$(echo -e "${Data}" |grep ",DOWN," |wc -l)
+    BakendRatio=$(( $(( ${BackendUP} * 100 )) / ${BackendTotal} ))    
+    HostsDown=$(echo -e -e "${Data}" |grep ",DOWN," |awk -F "," '{print $2}' |tr -s '\n' ',' |sed 's/,$//')
+    
+    if [ -z "${HostsDown}" ]; then
+        
+        echo "OK : Backend ratio ${BakendRatio}% (${BackendUP}/${BackendTotal}) |backend=${BakendRatio};${Warning};${Critical}"
+        exit 0
+        
+    elif (( ${BakendRatio} > ${Warning} )) ; then
+        
+        echo "OK : Backend ratio ${BakendRatio}% (${BackendUP}/${BackendTotal}), host down : ${HostsDown} |backend=${BakendRatio};${Warning};${Critical}"
+        exit 0
+        
+    elif (( ${BakendRatio} > ${Critical} )) ; then
+    
+        echo "WARNING : Backend ratio ${BakendRatio}% (${BackendUP}/${BackendTotal}), host down : ${HostsDown} |backend=${BakendRatio};${Warning};${Critical}"
+        exit 1
+        
+    else (( ${BakendRatio} < ${Critical} ))
+        
+        echo "CRITICAL : Backend ratio ${BakendRatio}% (${BackendUP}/${BackendTotal}), host down : ${HostsDown} |backend=${BakendRatio};${Warning};${Critical}"
+        exit 2
+        
+    fi
+
+}
+
+#-------------------------------------------------------------------------------
+# MAIN 
+#-------------------------------------------------------------------------------
+#> Handle command line options
+fct_doopts $@
+
+#> Run processing
+fct_haproxy_backend
