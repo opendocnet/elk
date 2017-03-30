@@ -1,0 +1,119 @@
+#!/bin/bash
+# ==============================================================================
+# Version       : 0.1
+# Date          : 2017/03/30
+# Last updated  : 2017/03/30
+# Autor         : Alexandre Bray
+# Information   : support@opendoc.net 
+# GIT URL       : https://github.com/opendocnet/elk/blob/master/check_events_logstash_indexer
+# GIT REVISION  : 25
+# Revision :
+#   0.1 : first version (rev 25)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# VARIABLES
+# ------------------------------------------------------------------------------
+Timeout=10
+BinJq="/home/nagios/plugins/tools/jq"
+Tmp="/run/shm"
+NewTime="$(date +%s)"
+
+# ------------------------------------------------------------------------------
+# FUNCTIONS 
+# ------------------------------------------------------------------------------
+#> Print usage
+fct_usage () {
+    echo "Usage: `basename $0` -H <host> -t <timeout>"
+    echo ""
+    echo "  -H  : logstash host"
+    echo "  -t  : timeout of request (default 10s)"
+    echo "  -h  : show help"
+    echo ""
+    exit 2
+}
+
+#> Process command line options
+fct_doopts () {
+    IFS=$'\n'
+    for args in $(echo -e "$(echo " $@" |sed 's/ -/\\n/g')"); do
+        Opt="$(echo "${args}" |cut -d " " -f1)"
+        ArgOpt="$(echo "${args}" |cut -d " " -f2-99 )"
+        
+        case "${Opt}" in
+            "H"|"host")         Host="${ArgOpt}";;
+            "t"|"timeout")      Timeout="${ArgOpt}";;
+            *)                  fct_usage ;;
+        esac
+     
+    done
+}
+
+
+fct_logstash_events () {
+    
+    BufferLogstashEvents="${Tmp}/buffer_events_logstash_indexer_${Host}"
+    
+    DataLogstashIndexer=$(curl --connect-timeout ${Timeout} "http://${Host}:9621/_node/stats/pipeline?pretty=true" 2>/dev/null)
+    if (( $? != 0 )) ; then
+         
+        echo "CRITICAL : The Logstash indexer API does not respond"
+        exit 2
+        
+    fi
+    
+    NewEventLostashIndexerIn=$(echo -e "${DataLogstashIndexer}" |${BinJq} '.pipeline.events.in' |sed 's/null/0/')
+    NewEventLostashIndexerOut=$(echo -e "${DataLogstashIndexer}" |${BinJq} '.pipeline.events.out' |sed 's/null/0/')
+    NewEventLostashIndexerFailed=$(echo -e "${DataLogstashIndexer}" |${BinJq} '.pipeline.plugins.filters[0].failures' |sed 's/null/0/')
+    
+    if ! test -s ${BufferLogstashEvents}; then
+        
+        echo "${NewTime};${NewEventLostashIndexerIn};${NewEventLostashIndexerOut};${NewEventLostashIndexerFailed}" > ${BufferLogstashEvents}
+        echo "Buffer in progress..."
+        exit 3
+        
+    fi
+    
+    Time=$(( ${NewTime} - $(cat ${BufferLogstashEvents} |awk -F ";" '{print $1}') ))
+    EventLostashIndexerIn=$(( $(( ${NewEventLostashIndexerIn} - $(cat ${BufferLogstashEvents} |awk -F ";" '{print $2}') )) / ${Time}))
+    EventLostashIndexerOut=$(( $(( ${NewEventLostashIndexerOut} - $(cat ${BufferLogstashEvents} |awk -F ";" '{print $3}') )) / ${Time}))
+    EventLostashIndexerFailed=$(( ${NewEventLostashIndexerFailed} - $(cat ${BufferLogstashEvents} |awk -F ";" '{print $4}') ))
+    
+    if (( ${EventLostashIndexerIn} < 0 || ${EventLostashIndexerOut} < 0 )); then
+        rm ${BufferLogstashEvents}
+        echo "Reset buffer"
+        exit 3
+    fi
+    
+    echo "${NewTime};${NewEventLostashIndexerIn};${NewEventLostashIndexerOut};${NewEventLostashIndexerFailed}" > ${BufferLogstashEvents}
+
+    DelayLogstashIndexer=$(( ${EventLostashIndexerIn} - ${EventLostashIndexerOut} ))
+    
+    if (( ${DelayLogstashIndexer} >= 10 )); then
+    
+        echo "CRITICAL : IN ${EventLostashIndexerIn}/s OUT ${EventLostashIndexerOut}/s DELAY ${DelayLogstashIndexer} FAILED ${EventLostashIndexerFailed}. Please see Elasticsearch status |in=${EventLostashIndexerIn} out=${EventLostashIndexerOut} delay=${DelayLogstashIndexer} failed=${EventLostashIndexerFailed}" 
+        exit 2
+        
+    elif (( ${EventLostashIndexerFailed} >= 10 )); then
+        
+        echo "CRITICAL : IN ${EventLostashIndexerIn}/s OUT ${EventLostashIndexerOut}/s DELAY ${DelayLogstashIndexer} FAILED ${EventLostashIndexerFailed}. Please see grok failures |in=${EventLostashIndexerIn} out=${EventLostashIndexerOut} delay=${DelayLogstashIndexer} failed=${EventLostashIndexerFailed}" 
+        exit 2
+        
+    else
+
+        echo "OK : IN ${EventLostashIndexerIn}/s OUT ${EventLostashIndexerOut}/s DELAY ${DelayLogstashIndexer} FAILED ${EventLostashIndexerFailed} |in=${EventLostashIndexerIn} out=${EventLostashIndexerOut} delay=${DelayLogstashIndexer} failed=${EventLostashIndexerFailed}"     
+        exit 0
+        
+    fi
+
+}
+
+#-------------------------------------------------------------------------------
+# MAIN 
+#-------------------------------------------------------------------------------
+#> Handle command line options
+fct_doopts $@
+
+#> Run processing
+fct_logstash_events
+
