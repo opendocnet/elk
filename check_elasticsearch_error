@@ -1,0 +1,82 @@
+#!/bin/bash
+# ==============================================================================
+# Version       : 0.1
+# Date          : 2017/03/30
+# Last updated  : 2017/03/30
+# Autor         : Alexandre Bray
+# Information   : support@opendoc.net 
+# GIT URL       : https://github.com/opendocnet/elk/blob/master/check_elasticsearch_error
+# GIT REVISION  : 17
+# Revision :
+#   0.1 : first version (rev 17)
+# ==============================================================================
+
+#-------------------------------------------------------------------------------
+# VARIABLES
+#-------------------------------------------------------------------------------
+ClusterName=`grep cluster.name: /etc/elasticsearch/elasticsearch.yml | awk -F'"' '{print $2}'`
+
+#-------------------------------------------------------------------------------
+# FUNCTIONS 
+#-------------------------------------------------------------------------------
+## Print usage
+usage() {
+    echo " Usage: `basename $0` -w <warning> -c <critical>"
+    echo ""
+    echo "  -w  warning"
+    echo "  -c  critical"
+    echo "  -h  help : show help"
+    echo ""
+}
+
+## Process command line options
+doopts() {
+    if ( `test 0 -lt $#` ); then
+        while getopts w:c:h myarg "$@" ; do
+            case $myarg in
+                h)
+                    usage
+                    exit;;
+                w)
+                    Warning=$OPTARG;;
+                c)
+                    Critical=$OPTARG;;
+                *)      # Default
+                    usage
+                    exit;;
+            esac
+        done
+    else
+        usage
+        exit
+    fi
+}
+
+## Search error
+function_elasticsearch_error () {
+
+    Error=$(grep -a "^\[`date +%Y-%m-%d` .*" /var/log/elasticsearch/${ClusterName}.log | awk -v Date=`date -d'now-1 minutes' +"%H:%M:%S,"` '{ if ($2 > Date) print $0 }'|wc -l) 
+ 
+    if [ ${Error} -lt ${Warning} ] ; then
+        echo "OK : ${Error} occurrences (w=${Warning}, c=${Critical})|error=${Error};${Warning};${Critical}"
+        exit 0
+elif [ ${Error} -lt ${Critical} ] ; then
+        echo "WARNING : ${Error} occurrences (w=${Warning}, c=${Critical})|error=${Error};${Warning};${Critical}"
+        grep -a "^\[`date +%Y-%m-%d` .*" /var/log/elasticsearch/${ClusterName}.log | awk -v Date=`date -d'now-1 minutes' +"%H:%M:%S,"` '{ if ($2 > Date) print $0 }' |sed -e 's/|//g' -e 's/;//g' -e 's/$/\\/'
+        exit 1
+else [ ${Error} -ge ${Critical} ] ;
+        echo "CRITICAL : ${Error} occurrences (w=${Warning}, c=${Critical})|error=${Error};${Warning};${Critical}"
+        grep -a "^\[`date +%Y-%m-%d` .*" /var/log/elasticsearch/${ClusterName}.log | awk -v Date=`date -d'now-1 minutes' +"%H:%M:%S,"` '{ if ($2 > Date) print $0 }' |sed -e 's/|//g' -e 's/;//g' -e 's/$/\\/'
+        exit 2
+fi 
+
+}
+
+#-------------------------------------------------------------------------------
+# MAIN 
+#-------------------------------------------------------------------------------
+## Handle command line options
+doopts $@
+
+## Run processing
+function_elasticsearch_error
