@@ -1,0 +1,96 @@
+#!/bin/bash
+# ==============================================================================
+# Version       : 0.1
+# Date          : 2017/03/30
+# Last updated  : 2017/03/30
+# Autor         : Alexandre Bray
+# Information   : support@opendoc.net 
+# GIT URL       : https://github.com/opendocnet/elk/blob/master/check_haproxy_sessions
+# GIT REVISION  : 15
+# Revision :
+#   0.1 : first version (rev 15)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# VARIABLES
+# ------------------------------------------------------------------------------
+Timeout=10
+
+# ------------------------------------------------------------------------------
+# FUNCTIONS 
+# ------------------------------------------------------------------------------
+#> Print usage
+fct_usage () {
+    echo "Usage: `basename $0` -H <host> -t <timeout> -f <frontend> -w <warning> -c <critical>"
+    echo ""
+    echo "  -H  : haproxy host"
+    echo "  -t  : timeout of request (default 10s)"
+    echo "  -f  : frontend name"
+    echo "  -w  : warning"
+    echo "  -c  : critical"
+    echo "  -h  : show help"
+    echo ""
+    exit 2
+}
+
+#> Process command line options
+fct_doopts () {
+    IFS=$'\n'
+    for args in $(echo -e "$(echo " $@" |sed 's/ -/\\n/g')"); do
+        Opt="$(echo "${args}" |cut -d " " -f1)"
+        ArgOpt="$(echo "${args}" |cut -d " " -f2-99 )"
+        
+        case "${Opt}" in
+            "H"|"host")         Host="${ArgOpt}";;
+            "t"|"timeout")      Timeout="${ArgOpt}";;
+            "f"|"fronted")      Frontend="${ArgOpt}";;
+            "w"|"warning")      Warning="${ArgOpt}" ;;
+            "c"|"critical")     Critical="${ArgOpt}" ;;
+            *)                  fct_usage ;;
+        esac
+     
+    done
+}
+
+
+fct_haproxy_sessions () {
+    
+    Data=$(curl --connect-timeout ${Timeout} "http://${Host}:8080/stats;csv" 2>/dev/null)
+    if (( $? != 0 )) ; then
+         
+        echo "CRITICAL : The HAProxy does not respond"
+        exit 2
+        
+    fi
+    
+    Sessions=$(echo -e "${Data}" |grep "${Frontend},FRONTEND"|awk -F"," '{print $5}')
+    SessionsRate=$(echo -e "${Data}" |grep "${Frontend},FRONTEND"|awk -F"," '{print $78}')
+    
+    if (( ${Sessions} < ${Warning} )) ; then
+        
+        echo "OK : ${Sessions} sessions on frontend ${Frontend} (sessionsrate=${SessionsRate}, w=${Warning}, c=${Critical})|sessions=${Sessions} sessionsrate=${SessionsRate} warning=${Warning} critical=${Critical}"
+        exit 0
+        
+    elif (( ${Sessions} < ${Critical} )) ; then
+    
+        echo "WARNING : ${Sessions} sessions on frontend ${Frontend} (sessionsrate=${SessionsRate}, w=${Warning}, c=${Critical})|sessions=${Sessions} sessionsrate=${SessionsRate} warning=${Warning} critical=${Critical}"
+        exit 1
+        
+    else (( ${Sessions} >= ${Critical} )) ;
+        
+        echo "CRITICAL : ${Sessions} sessions on frontend ${Frontend} (sessionsrate=${SessionsRate}, w=${Warning}, c=${Critical})|sessions=${Sessions} sessionsrate=${SessionsRate} warning=${Warning} critical=${Critical}"
+        exit 2
+        
+fi
+
+}
+
+
+#-------------------------------------------------------------------------------
+# MAIN 
+#-------------------------------------------------------------------------------
+#> Handle command line options
+fct_doopts $@
+
+#> Run processing
+fct_haproxy_sessions
