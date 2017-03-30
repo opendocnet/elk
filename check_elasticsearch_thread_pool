@@ -1,0 +1,98 @@
+# ==============================================================================
+# Version       : 0.1
+# Date          : 2017/03/30
+# Last updated  : 2017/03/30
+# Autor         : Alexandre Bray
+# Information   : support@opendoc.net 
+# GIT URL       : https://github.com/opendocnet/elk/blob/master/check_elasticsearch_thread_pool
+# GIT REVISION  : 22
+# Revision :
+#   0.1 : first version (rev 22)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# VARIABLES
+# ------------------------------------------------------------------------------
+MaxQueue=1000
+
+# ------------------------------------------------------------------------------
+# FUNCTIONS 
+# ------------------------------------------------------------------------------
+#> Print usage
+usage () {
+    echo " Usage: `basename $0` -l <loadbalancer> -p <port> -t <timeout>"
+    echo ""
+    echo "  -l  loadbalancer"
+    echo "  -p  port"
+    echo "  -t  timeout"
+    echo "  -h  help : show help"
+    echo ""
+}
+
+#> Process command line options
+doopts() {
+    if ( `test 0 -lt $#` ); then
+        while getopts l:p:t:h myarg "$@" ; do
+            case $myarg in
+                h)
+                    usage
+                    exit;;
+                l)
+                    Lb=$OPTARG;;
+                p)
+                    Port=$OPTARG;;
+                t)
+                    Timeout=$OPTARG;;
+                *)
+                    usage
+                    exit;;
+            esac
+        done
+    else
+        usage
+        exit
+    fi
+}
+
+function_thread_pool () {
+    
+    Data=$(curl --connect-timeout ${Timeout} -XGET 'http://'${Lb}':'${Port}'/_cat/thread_pool/generic?v&h=host,active,queue,rejected' 2>/dev/null)
+    if (( $? != 0 )) ; then
+         
+        echo "CRITICAL : The cluster does not respond"
+        exit 2
+        
+    fi
+    
+    Active=$(echo -e "${Data}" |grep -v host |awk '{sum+=$2} END {print sum}')
+    Queue=$(echo -e "${Data}" |grep -v host |awk '{sum+=$3} END {print sum}')
+    Rejected=$(echo -e "${Data}" |grep -v host |awk '{sum+=$4} END {print sum}')
+    
+    if [ ${Rejected} != 0 ]; then
+        
+        echo "CRITICAL : ${Rejected} tasks rejected by the thread pool executor|active=${Active};queue=${Queue};rejected=${Rejected};maxqueue=${MaxQueue}"
+        exit 2
+          
+    elif (( ${Queue} >= ${MaxQueue} )); then
+        
+        echo "CRITICAL : ${Queue} tasks in the queue for the current thread pool (Max queue : ${MaxQueue})|active=${Active};queue=${Queue};rejected=${Rejected};maxqueue=${MaxQueue}"
+        exit 2
+            
+    else
+        
+        echo "OK : ${Active} active tasks in the current thread pool|active=${Active};queue=${Queue};rejected=${Rejected};maxqueue=${MaxQueue}"
+        exit 0
+        
+    fi
+
+}
+
+
+#-------------------------------------------------------------------------------
+# MAIN 
+#-------------------------------------------------------------------------------
+#> Handle command line options
+doopts $@
+
+#> Run processing
+function_thread_pool
