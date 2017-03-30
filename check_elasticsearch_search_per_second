@@ -1,0 +1,126 @@
+#!/bin/bash
+# ==============================================================================
+# Version       : 0.1
+# Date          : 2017/03/30
+# Last updated  : 2017/03/30
+# Autor         : Alexandre Bray
+# Information   : support@opendoc.net 
+# GIT URL       : https://github.com/opendocnet/elk/blob/master/check_elasticsearch_search_per_second
+# GIT REVISION  : 19
+# Revision :
+#   0.1 : first version (rev 19)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# VARIABLES
+# ------------------------------------------------------------------------------
+Tmp="/run/shm"
+
+# ------------------------------------------------------------------------------
+# FUNCTIONS 
+# ------------------------------------------------------------------------------
+#> Print usage
+fct_usage () {
+    
+    echo -e "\nUsage : `basename $0` -host <hostname> -p <processing> -w <warning value> -c <critical value>\n"
+    echo -e "  \e[1m-H\e[21m, \e[1m-host\e[21m        : hostname"
+    echo -e "  \e[1m-p\e[21m, \e[1m-port\e[21m        : port number of elasticsearch"
+    echo -e "  \e[1m-w\e[21m, \e[1m-warning\e[21m     : warning value in second"
+    echo -e "  \e[1m-c\e[21m, \e[1m-critical\e[21m    : critical value in second"
+    echo -e "  \e[1m-h\e[21m               : show help\n"
+    exit 2
+    
+}
+
+#> Process command line options
+fct_doopts () {
+    
+    IFS=$'\n'
+    for args in $(echo -e "$(echo " $@" |sed 's/ -/\\n/g')"); do
+        Opt="$(echo "${args}" |cut -d " " -f1)"
+        ArgOpt="$(echo "${args}" |cut -d " " -f2-99 )"
+        
+        case "${Opt}" in
+            "H"|"host")         Host="${ArgOpt}" ;;
+            "p"|"port")         Port="${ArgOpt}" ;;
+            "w"|"warning")      Warning="${ArgOpt}" ;;
+            "c"|"critical")     Critical="${ArgOpt}" ;;
+            *)                  fct_usage ; exit ;;
+        esac
+     
+    done
+    
+}
+
+#> Write output and return result
+fct_output () {
+    
+    if [ $(echo "${Result} < ${Warning}" | bc -l) -eq 1 ] ; then
+         
+        echo "OK : ${Result} search/s (w=${Warning}, c=${Critical})|result=${Result};${Warning};${Critical};0"
+        exit 0
+        
+    elif [ $(echo "${Result} < ${Critical}" | bc -l) -eq 1 ] ; then
+         
+        echo "WARNING : ${Result} search/s (w=${Warning}, c=${Critical})|result=${Result};${Warning};${Critical};0" 
+        exit 1
+     
+    else [ $(echo "${Result} > ${Critical}" | bc -l) -eq 1 ]
+         
+        echo "Critical : ${Result} search/s (w=${Warning}, c=${Critical})|result=${Result};${Warning};${Critical};0"
+        exit 2
+        
+    fi
+}
+
+#> Run search
+fct_elasticsearch_search_per_second () {
+
+    ESstats="$(curl -XGET 'http://'${Host}':'${Port}'/_stats?pretty=true' 2>/dev/null)"
+    Total="$(echo -e "${ESstats}" |grep "query_total" |awk '{print $3}' |head -n 1 |sed 's/,//')"
+    Time="$(date +%s)"
+
+    test -s ${Tmp}/buffer_search_per_second_${Port}
+    if [ "$?" != "0" ]; then
+        echo "Total=${Total}" > ${Tmp}/buffer_search_per_second_${Port}
+        echo "Time=${Time}" >> ${Tmp}/buffer_search_per_second_${Port}
+        echo "Buffer in progress..."
+        exit 3
+        
+    fi
+
+    OLD_ESstats=$(cat ${Tmp}/buffer_search_per_second_${Port})
+    echo "Total=${Total}" > ${Tmp}/buffer_search_per_second_${Port}
+    echo "Time=${Time}" >> ${Tmp}/buffer_search_per_second_${Port}
+    DiffTotal=$(( ${Total} - $(echo -e "${OLD_ESstats}" | grep "Total=" | awk -F"=" '{print $2}') ))
+    DiffTime=$(( ${Time} - $(echo -e "${OLD_ESstats}" | grep "Time=" | awk -F"=" '{print $2}') ))
+
+    
+    if (( ${DiffTotal} == 0 )) || (( ${DiffTime} == 0 )) ; then
+         
+        Result=0
+        fct_output
+     
+    elif [ $(echo "${DiffTotal} < 0" | bc -l) -eq 1 ] ; then
+        
+        rm ${Tmp}/buffer_search_per_second_${Port}
+        echo "Reset buffer"
+        exit 3
+     
+    else
+            
+        Result=`echo "scale=3; ${DiffTotal}/${DiffTime}" | bc -l | sed 's/^\./0./'`
+        fct_output
+        
+    fi
+    
+}
+
+#-------------------------------------------------------------------------------
+# MAIN 
+#-------------------------------------------------------------------------------
+#> Handle command line options
+fct_doopts $@
+
+#> Run processing
+fct_elasticsearch_search_per_second
